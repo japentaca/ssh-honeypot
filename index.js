@@ -4,21 +4,10 @@ const fsSync = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 
-const Server = ssh2.Server;
+// Import centralized configuration
+const { CONFIG, displayConfig } = require('./config');
 
-// Configuration
-const CONFIG = {
-  PORT: 2222,
-  HOST: '0.0.0.0',
-  LOG_FILE: 'ssh_honeypot.log',
-  MAX_CONNECTIONS: 100,
-  DELAY_MIN: 2000,  // Minimum delay before closing connection (ms)
-  DELAY_MAX: 10000, // Maximum delay before closing connection (ms)
-  LOG_ROTATION_SIZE: 10 * 1024 * 1024, // 10MB
-  FAKE_SHELL_ENABLED: true,
-  RATE_LIMIT_WINDOW: 60000, // 1 minute
-  RATE_LIMIT_MAX_ATTEMPTS: 10
-};
+const Server = ssh2.Server;
 
 // Statistics and monitoring
 class HoneypotStats extends EventEmitter {
@@ -179,20 +168,21 @@ class FakeShell {
       'pwd': '/root\n',
       'whoami': 'root\n',
       'id': 'uid=0(root) gid=0(root) groups=0(root)\n',
-      'uname -a': 'Linux honeypot 5.4.0-42-generic #46-Ubuntu SMP Fri Jul 10 00:24:02 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux\n',
+      'uname -a': CONFIG.FAKE_SHELL_KERNEL + '\n',
       'cat /etc/passwd': 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n',
-      'ps aux': 'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.1   8892   764 ?        Ss   12:00   0:01 /sbin/init\n'
+      'ps aux': 'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.1   8892   764 ?        Ss   12:00   0:01 /sbin/init\n',
+      'hostname': CONFIG.FAKE_SHELL_HOSTNAME + '\n'
     };
   }
 
   start() {
     this.client.write('Last login: ' + new Date().toUTCString() + ' from ' + this.ip + '\r\n');
-    this.client.write('Welcome to Ubuntu 20.04.1 LTS (GNU/Linux 5.4.0-42-generic x86_64)\r\n\r\n');
+    this.client.write(`Welcome to ${CONFIG.FAKE_SHELL_OS} (GNU/Linux ${CONFIG.FAKE_SHELL_KERNEL.split(' ')[2]} x86_64)\r\n\r\n`);
     this.prompt();
   }
 
   prompt() {
-    this.client.write('root@honeypot:~# ');
+    this.client.write(`root@${CONFIG.FAKE_SHELL_HOSTNAME}:~# `);
   }
 
   handleCommand(command) {
@@ -230,12 +220,14 @@ class SSHHoneypot {
       console.log(`[${new Date().toISOString()}] Login attempt from ${data.ip} - User: "${data.username}" Pass: "${data.password}"`);
     });
 
-    // Statistics display every 5 minutes
-    setInterval(() => this.displayStats(), 300000);
+    // Statistics display at configured interval
+    if (CONFIG.STATS_DISPLAY_INTERVAL > 0) {
+      setInterval(() => this.displayStats(), CONFIG.STATS_DISPLAY_INTERVAL);
+    }
   }
 
   async generateHostKey() {
-    const hostKeyPath = path.join(__dirname, 'host.key');
+    const hostKeyPath = path.join(__dirname, CONFIG.HOST_KEY_PATH);
 
     if (!fsSync.existsSync(hostKeyPath)) {
       console.log('Generating RSA host key...');
@@ -295,14 +287,15 @@ class SSHHoneypot {
         this.stats.addAttempt(info.ip, username, password);
 
         // Simulate processing delay
+        const authDelay = Math.random() * (CONFIG.AUTH_DELAY_MAX - CONFIG.AUTH_DELAY_MIN) + CONFIG.AUTH_DELAY_MIN;
         setTimeout(() => {
-          if (CONFIG.FAKE_SHELL_ENABLED && Math.random() < 0.1) { // 10% chance of "successful" login
+          if (CONFIG.FAKE_SHELL_ENABLED && Math.random() < CONFIG.FAKE_SHELL_SUCCESS_RATE) {
             isAuthenticated = true;
             ctx.accept();
           } else {
             ctx.reject();
           }
-        }, Math.random() * 3000 + 500); // 500-3500ms delay
+        }, authDelay);
       } else {
         ctx.reject();
       }
@@ -367,11 +360,11 @@ class SSHHoneypot {
     console.log(`Total Login Attempts: ${stats.totalAttempts}`);
     console.log(`Unique IPs: ${stats.uniqueIPs}`);
     console.log('\nTop Usernames:');
-    stats.topUsernames.slice(0, 5).forEach(([user, count]) => {
+    stats.topUsernames.slice(0, CONFIG.STATS_TOP_COUNT).forEach(([user, count]) => {
       console.log(`  ${user}: ${count}`);
     });
     console.log('\nTop Passwords:');
-    stats.topPasswords.slice(0, 5).forEach(([pass, count]) => {
+    stats.topPasswords.slice(0, CONFIG.STATS_TOP_COUNT).forEach(([pass, count]) => {
       console.log(`  ${pass}: ${count}`);
     });
     console.log('============================\n');
@@ -383,15 +376,12 @@ class SSHHoneypot {
 
       this.server = new Server({
         hostKeys: [hostKey],
-        banner: 'SSH-2.0-OpenSSH_7.4'
+        banner: CONFIG.SSH_BANNER
       }, (client, info) => this.handleClient(client, info));
 
       this.server.listen(CONFIG.PORT, CONFIG.HOST, () => {
-        console.log(`🍯 SSH Honeypot started on ${CONFIG.HOST}:${CONFIG.PORT}`);
-        console.log(`📝 Logging to: ${CONFIG.LOG_FILE}`);
-        console.log(`🔧 Max connections: ${CONFIG.MAX_CONNECTIONS}`);
-        console.log(`⏱️  Connection delay: ${CONFIG.DELAY_MIN}-${CONFIG.DELAY_MAX}ms`);
-        console.log(`🐚 Fake shell: ${CONFIG.FAKE_SHELL_ENABLED ? 'enabled' : 'disabled'}`);
+        console.log('\n🍯 SSH Honeypot Started Successfully!\n');
+        displayConfig();
         console.log('Press Ctrl+C to stop\n');
       });
 

@@ -1,1 +1,5 @@
 node_modules
+.env
+host.key
+ssh_honeypot.log*
+*.log

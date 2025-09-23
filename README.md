@@ -45,22 +45,79 @@ El honeypot se iniciará por defecto en el puerto 2222.
 
 ## ⚙️ Configuración
 
-Puedes modificar la configuración editando el objeto `CONFIG` en [`index.js`](index.js:10):
+### Configuración mediante Variables de Entorno
 
-```javascript
-const CONFIG = {
-  PORT: 2222,                    // Puerto del honeypot
-  HOST: '0.0.0.0',               // Interfaz de red
-  LOG_FILE: 'ssh_honeypot.log',  // Archivo de logs
-  MAX_CONNECTIONS: 100,          // Máximo de conexiones simultáneas
-  DELAY_MIN: 2000,               // Delay mínimo antes de cerrar (ms)
-  DELAY_MAX: 10000,              // Delay máximo antes de cerrar (ms)
-  LOG_ROTATION_SIZE: 10485760,   // Tamaño máximo del log (10MB)
-  FAKE_SHELL_ENABLED: true,      // Habilitar shell falso
-  RATE_LIMIT_WINDOW: 60000,      // Ventana de rate limit (1 min)
-  RATE_LIMIT_MAX_ATTEMPTS: 10    // Máximo de intentos por ventana
-};
+El honeypot ahora utiliza **dotenv** para cargar la configuración desde variables de entorno, proporcionando valores por defecto automáticos si no están definidas. Esto permite una configuración flexible sin modificar el código.
+
+#### Configuración Rápida
+
+1. **Copia el archivo de ejemplo**:
+```bash
+cp .env.example .env
 ```
+
+2. **Edita el archivo `.env`** con tus valores personalizados (opcional)
+
+3. **Inicia el honeypot** - usará las variables de entorno o los valores por defecto
+
+#### Variables de Entorno Disponibles
+
+| Variable | Descripción | Valor por Defecto | Tipo |
+|----------|-------------|-------------------|------|
+| **Configuración del Servidor** |
+| `SSH_HONEYPOT_PORT` | Puerto de escucha SSH | `2222` | Número (1-65535) |
+| `SSH_HONEYPOT_HOST` | Interfaz de red a usar | `0.0.0.0` | String |
+| `SSH_HONEYPOT_BANNER` | Banner SSH del servidor | `SSH-2.0-OpenSSH_7.4` | String |
+| `SSH_HONEYPOT_HOST_KEY_PATH` | Ruta al archivo de clave del host | `host.key` | String |
+| **Configuración de Logs** |
+| `SSH_HONEYPOT_LOG_FILE` | Archivo de registro | `ssh_honeypot.log` | String |
+| `SSH_HONEYPOT_LOG_ROTATION_SIZE` | Tamaño máximo antes de rotar (bytes) | `10485760` (10MB) | Número |
+| **Gestión de Conexiones** |
+| `SSH_HONEYPOT_MAX_CONNECTIONS` | Máximo de conexiones simultáneas | `100` | Número |
+| `SSH_HONEYPOT_DELAY_MIN` | Delay mínimo antes de cerrar (ms) | `2000` | Número |
+| `SSH_HONEYPOT_DELAY_MAX` | Delay máximo antes de cerrar (ms) | `10000` | Número |
+| **Autenticación** |
+| `SSH_HONEYPOT_AUTH_DELAY_MIN` | Delay mínimo de autenticación (ms) | `500` | Número |
+| `SSH_HONEYPOT_AUTH_DELAY_MAX` | Delay máximo de autenticación (ms) | `3500` | Número |
+| **Shell Falso** |
+| `SSH_HONEYPOT_FAKE_SHELL_ENABLED` | Habilitar shell interactivo | `true` | Boolean |
+| `SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE` | Tasa de éxito de login (0-1) | `0.1` (10%) | Float |
+| `SSH_HONEYPOT_FAKE_SHELL_HOSTNAME` | Hostname del sistema simulado | `honeypot` | String |
+| `SSH_HONEYPOT_FAKE_SHELL_OS` | Sistema operativo simulado | `Ubuntu 20.04.1 LTS` | String |
+| `SSH_HONEYPOT_FAKE_SHELL_KERNEL` | Información del kernel | `Linux honeypot 5.4.0...` | String |
+| **Rate Limiting** |
+| `SSH_HONEYPOT_RATE_LIMIT_WINDOW` | Ventana de tiempo (ms) | `60000` (1 min) | Número |
+| `SSH_HONEYPOT_RATE_LIMIT_MAX_ATTEMPTS` | Máximo de intentos por ventana | `10` | Número |
+| **Estadísticas** |
+| `SSH_HONEYPOT_STATS_DISPLAY_INTERVAL` | Intervalo de estadísticas (ms) | `300000` (5 min) | Número |
+| `SSH_HONEYPOT_STATS_TOP_COUNT` | Cantidad de top items a mostrar | `5` | Número |
+
+#### Ejemplo de Archivo `.env`
+
+```bash
+# Configuración básica del servidor
+SSH_HONEYPOT_PORT=2222
+SSH_HONEYPOT_HOST=0.0.0.0
+
+# Configuración de logs
+SSH_HONEYPOT_LOG_FILE=honeypot.log
+SSH_HONEYPOT_LOG_ROTATION_SIZE=5242880  # 5MB
+
+# Shell falso
+SSH_HONEYPOT_FAKE_SHELL_ENABLED=true
+SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE=0.05  # 5% de éxito
+
+# Rate limiting más estricto
+SSH_HONEYPOT_RATE_LIMIT_MAX_ATTEMPTS=5
+```
+
+#### Características del Sistema de Configuración
+
+- **🔄 Valores por Defecto Automáticos**: Si una variable no está definida o está vacía, se usa el valor por defecto
+- **✅ Validación de Configuración**: El sistema valida automáticamente los valores al iniciar
+- **📝 Logging de Configuración**: Se muestra qué valores se están usando al iniciar
+- **🔒 Compatibilidad Hacia Atrás**: El sistema funciona sin archivo `.env`
+- **⚡ Carga Dinámica**: Las variables se cargan al inicio sin necesidad de recompilar
 
 ## 📊 Estadísticas
 
@@ -137,6 +194,9 @@ El shell interactivo simula los siguientes comandos:
 ```
 ssh-honeypot/
 ├── index.js           # Archivo principal del honeypot
+├── config.js          # Módulo de configuración centralizada
+├── .env               # Variables de entorno (no incluir en git)
+├── .env.example       # Ejemplo de configuración con documentación
 ├── package.json       # Dependencias y metadatos
 ├── package-lock.json  # Lock file de dependencias
 ├── host.key          # Clave privada del host (generada automáticamente)
@@ -147,12 +207,20 @@ ssh-honeypot/
 
 ### Arquitectura
 
-El honeypot está construido con las siguientes clases principales:
+El honeypot está construido con los siguientes componentes:
 
+#### Clases Principales
 - **`SSHHoneypot`**: Clase principal que gestiona el servidor
 - **`HoneypotStats`**: Maneja estadísticas y monitoreo
 - **`HoneypotLogger`**: Sistema de logging thread-safe con rotación
 - **`FakeShell`**: Simula una shell interactiva de Linux
+
+#### Módulos de Configuración
+- **[`config.js`](config.js)**: Módulo centralizado de configuración con:
+  - Carga de variables de entorno mediante dotenv
+  - Valores por defecto automáticos
+  - Validación de configuración
+  - Funciones helper para diferentes tipos de datos
 
 ## 🤝 Contribuciones
 
@@ -179,6 +247,7 @@ Para preguntas, sugerencias o reportes de seguridad, por favor abre un issue en 
 ## 🙏 Agradecimientos
 
 - [ssh2](https://github.com/mscdex/ssh2) - Librería SSH2 para Node.js
+- [dotenv](https://github.com/motdotla/dotenv) - Gestión de variables de entorno
 - Comunidad de seguridad informática por compartir conocimiento
 
 ---
