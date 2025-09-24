@@ -207,8 +207,31 @@ class SSHHoneypot {
     this.logger = new HoneypotLogger(CONFIG.LOG_FILE);
     this.server = null;
     this.isShuttingDown = false;
+    this.allowedCredentials = this.parseAllowedCredentials();
 
     this.setupEventListeners();
+  }
+
+  // Parsear las credenciales permitidas desde la configuración
+  parseAllowedCredentials() {
+    const credentials = new Map();
+    if (CONFIG.ALLOWED_CREDENTIALS) {
+      const pairs = CONFIG.ALLOWED_CREDENTIALS.split(',');
+      pairs.forEach(pair => {
+        const [username, password] = pair.trim().split(':');
+        if (username && password) {
+          credentials.set(username, password);
+        }
+      });
+    }
+    console.log(`📋 Loaded ${credentials.size} allowed credential pairs`);
+    return credentials;
+  }
+
+  // Verificar si las credenciales están en la lista de permitidas
+  isAllowedCredential(username, password) {
+    return this.allowedCredentials.has(username) &&
+      this.allowedCredentials.get(username) === password;
   }
 
   setupEventListeners() {
@@ -289,10 +312,19 @@ class SSHHoneypot {
         // Simulate processing delay
         const authDelay = Math.random() * (CONFIG.AUTH_DELAY_MAX - CONFIG.AUTH_DELAY_MIN) + CONFIG.AUTH_DELAY_MIN;
         setTimeout(() => {
-          if (CONFIG.FAKE_SHELL_ENABLED && Math.random() < CONFIG.FAKE_SHELL_SUCCESS_RATE) {
+          // Verificar primero si las credenciales están en la lista de permitidas
+          if (this.isAllowedCredential(username, password)) {
             isAuthenticated = true;
+            console.log(`[${new Date().toISOString()}] Authentication SUCCESS (ALLOWED CREDENTIAL) for ${info.ip} - User: "${username}"`);
+            ctx.accept();
+          }
+          // Si no está en la lista, usar la lógica de probabilidad del shell falso
+          else if (CONFIG.FAKE_SHELL_ENABLED && Math.random() < CONFIG.FAKE_SHELL_SUCCESS_RATE) {
+            isAuthenticated = true;
+            console.log(`[${new Date().toISOString()}] Authentication SUCCESS (RANDOM) for ${info.ip} - User: "${username}"`);
             ctx.accept();
           } else {
+            console.log(`[${new Date().toISOString()}] Authentication FAILED for ${info.ip} - User: "${username}"`);
             ctx.reject();
           }
         }, authDelay);

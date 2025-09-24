@@ -93,7 +93,7 @@ const CONFIG = {
 
   // Feature Flags
   FAKE_SHELL_ENABLED: getEnvBool('SSH_HONEYPOT_FAKE_SHELL_ENABLED', true),
-  FAKE_SHELL_SUCCESS_RATE: getEnvFloat('SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE', 0.1), // 10% default
+  FAKE_SHELL_SUCCESS_RATE: getEnvFloat('SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE', 0.9), // 10% default
 
   // Rate Limiting
   RATE_LIMIT_WINDOW: getEnvInt('SSH_HONEYPOT_RATE_LIMIT_WINDOW', 60000), // 1 minute default
@@ -115,6 +115,9 @@ const CONFIG = {
   FAKE_SHELL_HOSTNAME: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_HOSTNAME', 'honeypot'),
   FAKE_SHELL_OS: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_OS', 'Ubuntu 20.04.1 LTS'),
   FAKE_SHELL_KERNEL: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_KERNEL', 'Linux honeypot 5.4.0-42-generic #46-Ubuntu SMP Fri Jul 10 00:24:02 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux'),
+
+  // Credenciales que siempre permiten acceso (formato: "usuario:contraseña,usuario2:contraseña2")
+  ALLOWED_CREDENTIALS: getEnvVar('SSH_HONEYPOT_ALLOWED_CREDENTIALS', 'admin:admin,root:password,test:test'),
 };
 
 /**
@@ -166,7 +169,17 @@ function displayConfig() {
   console.log(`Log File: ${CONFIG.LOG_FILE}`);
   console.log(`Max Connections: ${CONFIG.MAX_CONNECTIONS}`);
   console.log(`Fake Shell: ${CONFIG.FAKE_SHELL_ENABLED ? 'Enabled' : 'Disabled'}`);
+  if (CONFIG.FAKE_SHELL_ENABLED) {
+    console.log(`Success Rate: ${(CONFIG.FAKE_SHELL_SUCCESS_RATE * 100).toFixed(1)}%`);
+  }
   console.log(`Rate Limit: ${CONFIG.RATE_LIMIT_MAX_ATTEMPTS} attempts per ${CONFIG.RATE_LIMIT_WINDOW}ms`);
+  
+  // Mostrar credenciales permitidas (sin las contraseñas por seguridad)
+  if (CONFIG.ALLOWED_CREDENTIALS) {
+    const credentialPairs = CONFIG.ALLOWED_CREDENTIALS.split(',');
+    const usernames = credentialPairs.map(pair => pair.trim().split(':')[0]).filter(Boolean);
+    console.log(`Allowed Users: ${usernames.join(', ')}`);
+  }
   console.log('================================\n');
 }
 
