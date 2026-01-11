@@ -85,6 +85,8 @@ const CONFIG = {
   // Logging Configuration
   LOG_FILE: getEnvVar('SSH_HONEYPOT_LOG_FILE', 'ssh_honeypot.log'),
   LOG_ROTATION_SIZE: getEnvInt('SSH_HONEYPOT_LOG_ROTATION_SIZE', 10 * 1024 * 1024), // 10MB default
+  // Maximum number of rotated log files to keep. 0 = unlimited.
+  LOG_ROTATION_MAX_FILES: getEnvInt('SSH_HONEYPOT_LOG_ROTATION_MAX_FILES', 10),
 
   // Connection Management
   MAX_CONNECTIONS: getEnvInt('SSH_HONEYPOT_MAX_CONNECTIONS', 100),
@@ -113,11 +115,20 @@ const CONFIG = {
 
   // Fake Shell Responses (can be customized via environment)
   FAKE_SHELL_HOSTNAME: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_HOSTNAME', 'honeypot'),
+  // Fake shell prompt shown to connected clients (keep it simple to avoid leaking obvious honeypot markers)
+  // Example values: "~$ ", "$ ", "ubuntu@host:~$ ", "[admin@server ~]$ "
+  FAKE_SHELL_PROMPT: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_PROMPT', '~$ '),
   FAKE_SHELL_OS: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_OS', 'Ubuntu 20.04.1 LTS'),
   FAKE_SHELL_KERNEL: getEnvVar('SSH_HONEYPOT_FAKE_SHELL_KERNEL', 'Linux honeypot 5.4.0-42-generic #46-Ubuntu SMP Fri Jul 10 00:24:02 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux'),
 
   // Credenciales que siempre permiten acceso (formato: "usuario:contraseña,usuario2:contraseña2")
   ALLOWED_CREDENTIALS: getEnvVar('SSH_HONEYPOT_ALLOWED_CREDENTIALS', 'admin:admin,root:password,test:test'),
+
+  // Warning Message Configuration
+  ENABLE_WARNING_MESSAGE: getEnvBool('SSH_HONEYPOT_ENABLE_WARNING_MESSAGE', false),
+  WARNING_MESSAGE_TEXT: getEnvVar('SSH_HONEYPOT_WARNING_MESSAGE_TEXT',
+    'WARNING: Unauthorized access attempt detected. This system is monitored and protected. Your IP address has been logged and will be investigated and reported to relevant authorities.'),
+  WARNING_MESSAGE_DELAY: getEnvInt('SSH_HONEYPOT_WARNING_MESSAGE_DELAY', 1500), // milliseconds
 };
 
 /**
@@ -151,6 +162,16 @@ function validateConfig() {
     errors.push(`FAKE_SHELL_SUCCESS_RATE must be between 0 and 1. Got: ${CONFIG.FAKE_SHELL_SUCCESS_RATE}`);
   }
 
+  // Log rotation retention validation
+  if (CONFIG.LOG_ROTATION_MAX_FILES < 0) {
+    errors.push(`LOG_ROTATION_MAX_FILES must be 0 (unlimited) or a positive integer. Got: ${CONFIG.LOG_ROTATION_MAX_FILES}`);
+  }
+
+  // Warning message delay validation
+  if (CONFIG.WARNING_MESSAGE_DELAY < 0) {
+    errors.push(`WARNING_MESSAGE_DELAY must be a positive integer. Got: ${CONFIG.WARNING_MESSAGE_DELAY}`);
+  }
+
   if (errors.length > 0) {
     console.error('❌ Configuration validation failed:');
     errors.forEach(error => console.error(`   - ${error}`));
@@ -173,6 +194,10 @@ function displayConfig() {
     console.log(`Success Rate: ${(CONFIG.FAKE_SHELL_SUCCESS_RATE * 100).toFixed(1)}%`);
   }
   console.log(`Rate Limit: ${CONFIG.RATE_LIMIT_MAX_ATTEMPTS} attempts per ${CONFIG.RATE_LIMIT_WINDOW}ms`);
+  console.log(`Warning Message: ${CONFIG.ENABLE_WARNING_MESSAGE ? 'Enabled' : 'Disabled'}`);
+  if (CONFIG.ENABLE_WARNING_MESSAGE) {
+    console.log(`Warning Delay: ${CONFIG.WARNING_MESSAGE_DELAY}ms`);
+  }
 
   // Mostrar credenciales permitidas (sin las contraseñas por seguridad)
   if (CONFIG.ALLOWED_CREDENTIALS) {

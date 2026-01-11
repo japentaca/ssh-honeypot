@@ -10,6 +10,7 @@ Este proyecto implementa un honeypot SSH que simula un servidor SSH real para at
 
 - **🔐 Autenticación Simulada**: Acepta aleatoriamente conexiones (10% de probabilidad) para estudiar el comportamiento post-autenticación
 - **🐚 Shell Interactivo Falso**: Simula un entorno Linux con comandos básicos
+- **⚠️ Mensaje de Advertencia Configurable**: Opción de mostrar advertencia en inglés sobre investigación y denuncia de IPs
 - **📊 Estadísticas en Tiempo Real**: Monitoreo de conexiones, intentos de login y credenciales más utilizadas
 - **📝 Registro Detallado**: Logs en formato JSON con rotación automática
 - **🚦 Rate Limiting**: Protección contra ataques de fuerza bruta excesivos
@@ -72,6 +73,7 @@ cp .env.example .env
 | **Configuración de Logs** |
 | `SSH_HONEYPOT_LOG_FILE` | Archivo de registro | `ssh_honeypot.log` | String |
 | `SSH_HONEYPOT_LOG_ROTATION_SIZE` | Tamaño máximo antes de rotar (bytes) | `10485760` (10MB) | Número |
+| `SSH_HONEYPOT_LOG_ROTATION_MAX_FILES` | Máximo de archivos rotados a conservar (0 = ilimitado) | `10` | Número |
 | **Gestión de Conexiones** |
 | `SSH_HONEYPOT_MAX_CONNECTIONS` | Máximo de conexiones simultáneas | `100` | Número |
 | `SSH_HONEYPOT_DELAY_MIN` | Delay mínimo antes de cerrar (ms) | `2000` | Número |
@@ -83,8 +85,14 @@ cp .env.example .env
 | `SSH_HONEYPOT_FAKE_SHELL_ENABLED` | Habilitar shell interactivo | `true` | Boolean |
 | `SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE` | Tasa de éxito de login (0-1) | `0.1` (10%) | Float |
 | `SSH_HONEYPOT_FAKE_SHELL_HOSTNAME` | Hostname del sistema simulado | `honeypot` | String |
+| `SSH_HONEYPOT_FAKE_SHELL_PROMPT` | Prompt del shell falso mostrado al cliente | `~$ ` | String |
 | `SSH_HONEYPOT_FAKE_SHELL_OS` | Sistema operativo simulado | `Ubuntu 20.04.1 LTS` | String |
 | `SSH_HONEYPOT_FAKE_SHELL_KERNEL` | Información del kernel | `Linux honeypot 5.4.0...` | String |
+| `SSH_HONEYPOT_ALLOWED_CREDENTIALS` | Credenciales que siempre permiten acceso | `admin:admin,root:password,test:test` | String |
+| **Mensaje de Advertencia** |
+| `SSH_HONEYPOT_ENABLE_WARNING_MESSAGE` | Habilitar mensaje de advertencia | `false` | Boolean |
+| `SSH_HONEYPOT_WARNING_MESSAGE_TEXT` | Texto del mensaje de advertencia | `WARNING: Unauthorized access...` | String |
+| `SSH_HONEYPOT_WARNING_MESSAGE_DELAY` | Delay antes de mostrar mensaje (ms) | `1500` | Número |
 | **Rate Limiting** |
 | `SSH_HONEYPOT_RATE_LIMIT_WINDOW` | Ventana de tiempo (ms) | `60000` (1 min) | Número |
 | `SSH_HONEYPOT_RATE_LIMIT_MAX_ATTEMPTS` | Máximo de intentos por ventana | `10` | Número |
@@ -102,6 +110,7 @@ SSH_HONEYPOT_HOST=0.0.0.0
 # Configuración de logs
 SSH_HONEYPOT_LOG_FILE=honeypot.log
 SSH_HONEYPOT_LOG_ROTATION_SIZE=5242880  # 5MB
+SSH_HONEYPOT_LOG_ROTATION_MAX_FILES=10  # conservar los 10 logs rotados más recientes
 
 # Shell falso
 SSH_HONEYPOT_FAKE_SHELL_ENABLED=true

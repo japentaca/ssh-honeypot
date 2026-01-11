@@ -9,6 +9,10 @@ const { CONFIG, displayConfig } = require('./config');
 
 const Server = ssh2.Server;
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // Statistics and monitoring
 class HoneypotStats extends EventEmitter {
   constructor() {
@@ -89,6 +93,61 @@ class HoneypotLogger {
     this.ensureLogFile();
   }
 
+  getLogDirAndBase() {
+    const absoluteLogPath = path.resolve(this.logFile);
+    return {
+      dir: path.dirname(absoluteLogPath),
+      base: path.basename(absoluteLogPath),
+      absoluteLogPath
+    };
+  }
+
+  async cleanupRotatedLogs() {
+    const maxFiles = CONFIG.LOG_ROTATION_MAX_FILES;
+    if (!Number.isFinite(maxFiles) || maxFiles <= 0) return;
+
+    const { dir, base } = this.getLogDirAndBase();
+    const prefix = `${base}.`;
+
+    // Matches files like: <base>.<ISO-ish timestamp> or <base>.<timestamp>.<suffix>
+    // Example timestamp after normalization: 2026-01-11T12-34-56-789Z
+    const rotatedNameRegex = new RegExp(
+      `^${escapeRegExp(prefix)}(\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z)(?:\\.(\\d+))?$`
+    );
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const rotatedFiles = entries
+        .filter(entry => entry.isFile() && entry.name.startsWith(prefix))
+        .map(entry => {
+          const match = rotatedNameRegex.exec(entry.name);
+          if (!match) return null;
+          return {
+            name: entry.name,
+            timestamp: match[1],
+            suffix: match[2] ? parseInt(match[2], 10) : 0
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          // Newest first (timestamp is lexicographically sortable)
+          if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? 1 : -1;
+          return b.suffix - a.suffix;
+        });
+
+      const filesToDelete = rotatedFiles.slice(maxFiles);
+      for (const file of filesToDelete) {
+        try {
+          await fs.unlink(path.join(dir, file.name));
+        } catch (err) {
+          console.warn(`⚠️  Failed to delete rotated log "${file.name}": ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️  Failed to cleanup rotated logs: ${err.message}`);
+    }
+  }
+
   async ensureLogFile() {
     try {
       await fs.access(this.logFile);
@@ -102,10 +161,23 @@ class HoneypotLogger {
       const stats = await fs.stat(this.logFile);
       if (stats.size > CONFIG.LOG_ROTATION_SIZE) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const rotatedFile = `${this.logFile}.${timestamp}`;
+        let rotatedFile = `${this.logFile}.${timestamp}`;
+
+        // Avoid collisions if multiple rotations happen within the same timestamp granularity
+        for (let suffix = 1; suffix <= 100; suffix++) {
+          try {
+            await fs.access(rotatedFile);
+            rotatedFile = `${this.logFile}.${timestamp}.${suffix}`;
+          } catch {
+            break;
+          }
+        }
+
         await fs.rename(this.logFile, rotatedFile);
         await fs.writeFile(this.logFile, '');
         console.log(`Log rotated to: ${rotatedFile}`);
+
+        await this.cleanupRotatedLogs();
       }
     } catch (err) {
       console.error('Error rotating log:', err.message);
@@ -163,6 +235,7 @@ class FakeShell {
   constructor(client, ip) {
     this.client = client;
     this.ip = ip;
+    this.inputBuffer = '';  // Buffer para acumular la entrada del usuario
     this.commands = {
       'ls': 'total 8\ndrwxr-xr-x 2 root root 4096 Jan 1 12:00 .\ndrwxr-xr-x 3 root root 4096 Jan 1 12:00 ..\n-rw-r--r-- 1 root root  220 Jan 1 12:00 .bash_logout\n',
       'pwd': '/root\n',
@@ -182,7 +255,45 @@ class FakeShell {
   }
 
   prompt() {
-    this.client.write(`root@${CONFIG.FAKE_SHELL_HOSTNAME}:~# `);
+    this.client.write(CONFIG.FAKE_SHELL_PROMPT);
+  }
+
+  handleInput(data) {
+    for (let i = 0; i < data.length; i++) {
+      const char = data[i];
+
+      // Enter key (\r o \n)
+      if (char === 0x0d || char === 0x0a) {
+        this.client.write('\r\n');
+        const cmd = this.inputBuffer.trim();
+        this.inputBuffer = '';
+
+        if (this.commands[cmd]) {
+          this.client.write(this.commands[cmd]);
+        } else if (cmd === 'exit' || cmd === 'logout') {
+          this.client.write('logout\r\n');
+          return false; // Signal to close connection
+        } else if (cmd) {
+          this.client.write(`bash: ${cmd}: command not found\r\n`);
+        }
+
+        this.prompt();
+      }
+      // Backspace / Delete (0x7f = DEL, 0x08 = BS)
+      else if (char === 0x7f || char === 0x08) {
+        if (this.inputBuffer.length > 0) {
+          this.inputBuffer = this.inputBuffer.slice(0, -1);
+          // Mover cursor atrás, escribir espacio, mover cursor atrás otra vez
+          this.client.write('\x08 \x08');
+        }
+      }
+      // Carácter normal imprimible
+      else if (char >= 0x20 && char <= 0x7e) {
+        this.inputBuffer += String.fromCharCode(char);
+        this.client.write(String.fromCharCode(char)); // Echo del carácter
+      }
+    }
+    return true;
   }
 
   handleCommand(command) {
@@ -311,22 +422,12 @@ class SSHHoneypot {
 
         // Simulate processing delay
         const authDelay = Math.random() * (CONFIG.AUTH_DELAY_MAX - CONFIG.AUTH_DELAY_MIN) + CONFIG.AUTH_DELAY_MIN;
+
         setTimeout(() => {
-          // Verificar primero si las credenciales están en la lista de permitidas
-          if (this.isAllowedCredential(username, password)) {
-            isAuthenticated = true;
-            console.log(`[${new Date().toISOString()}] Authentication SUCCESS (ALLOWED CREDENTIAL) for ${info.ip} - User: "${username}"`);
-            ctx.accept();
-          }
-          // Si no está en la lista, usar la lógica de probabilidad del shell falso
-          else if (CONFIG.FAKE_SHELL_ENABLED && Math.random() < CONFIG.FAKE_SHELL_SUCCESS_RATE) {
-            isAuthenticated = true;
-            console.log(`[${new Date().toISOString()}] Authentication SUCCESS (RANDOM) for ${info.ip} - User: "${username}"`);
-            ctx.accept();
-          } else {
-            console.log(`[${new Date().toISOString()}] Authentication FAILED for ${info.ip} - User: "${username}"`);
-            ctx.reject();
-          }
+          // Siempre aceptar la autenticación
+          isAuthenticated = true;
+          console.log(`[${new Date().toISOString()}] Authentication SUCCESS for ${info.ip} - User: "${username}"`);
+          ctx.accept();
         }, authDelay);
       } else {
         ctx.reject();
@@ -336,29 +437,58 @@ class SSHHoneypot {
     client.on('ready', () => {
       console.log(`Client authenticated: ${clientId}`);
 
-      client.on('session', (accept, reject) => {
-        const session = accept();
+      // Si el mensaje de advertencia está habilitado, mostrarlo y cerrar la sesión
+      if (CONFIG.ENABLE_WARNING_MESSAGE) {
+        client.on('session', (accept, reject) => {
+          const session = accept();
 
-        session.once('shell', (accept, reject) => {
-          const stream = accept();
-          shell = new FakeShell(stream, info.ip);
-          shell.start();
+          session.once('shell', (accept, reject) => {
+            const stream = accept();
 
-          stream.on('data', (data) => {
-            const command = data.toString();
-            if (!shell.handleCommand(command)) {
-              client.end();
-            }
+            // Esperar el delay configurado antes de mostrar el mensaje
+            setTimeout(() => {
+              stream.write(`\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
+              stream.write('Connection closed by remote host.\r\n');
+
+              setTimeout(() => {
+                stream.end();
+                client.end();
+              }, 1000);
+            }, CONFIG.WARNING_MESSAGE_DELAY);
+          });
+
+          session.once('exec', (accept, reject, info) => {
+            const stream = accept();
+            stream.write(`\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
+            stream.end();
+            client.end();
           });
         });
+      } else {
+        // Comportamiento normal del fake shell
+        client.on('session', (accept, reject) => {
+          const session = accept();
 
-        session.once('exec', (accept, reject, info) => {
-          const stream = accept();
-          stream.write(`bash: ${info.command}: command not found\r\n`);
-          stream.exit(127);
-          stream.end();
+          session.once('shell', (accept, reject) => {
+            const stream = accept();
+            shell = new FakeShell(stream, info.ip);
+            shell.start();
+
+            stream.on('data', (data) => {
+              if (!shell.handleInput(data)) {
+                client.end();
+              }
+            });
+          });
+
+          session.once('exec', (accept, reject, info) => {
+            const stream = accept();
+            stream.write(`bash: ${info.command}: command not found\r\n`);
+            stream.exit(127);
+            stream.end();
+          });
         });
-      });
+      }
     });
 
     client.on('end', () => {
