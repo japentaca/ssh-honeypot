@@ -93,7 +93,7 @@ const CONFIG = {
 
   // Feature Flags
   FAKE_SHELL_ENABLED: getEnvBool('SSH_HONEYPOT_FAKE_SHELL_ENABLED', true),
-  FAKE_SHELL_SUCCESS_RATE: getEnvFloat('SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE', 0.9), // 10% default
+  FAKE_SHELL_SUCCESS_RATE: getEnvFloat('SSH_HONEYPOT_FAKE_SHELL_SUCCESS_RATE', 0.1), // 10% default
 
   // Rate Limiting
   RATE_LIMIT_WINDOW: getEnvInt('SSH_HONEYPOT_RATE_LIMIT_WINDOW', 60000), // 1 minute default
@@ -173,7 +173,7 @@ function displayConfig() {
     console.log(`Success Rate: ${(CONFIG.FAKE_SHELL_SUCCESS_RATE * 100).toFixed(1)}%`);
   }
   console.log(`Rate Limit: ${CONFIG.RATE_LIMIT_MAX_ATTEMPTS} attempts per ${CONFIG.RATE_LIMIT_WINDOW}ms`);
-  
+
   // Mostrar credenciales permitidas (sin las contraseñas por seguridad)
   if (CONFIG.ALLOWED_CREDENTIALS) {
     const credentialPairs = CONFIG.ALLOWED_CREDENTIALS.split(',');
