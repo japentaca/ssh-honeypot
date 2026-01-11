@@ -448,7 +448,7 @@ class SSHHoneypot {
             // Mostrar mensaje inmediatamente y luego cerrar
             stream.write(`\r\n\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
             stream.write('Connection will be closed.\r\n\r\n');
-            
+
             // Esperar antes de cerrar para que el mensaje se envíe completamente
             setTimeout(() => {
               stream.exit(0);
