@@ -3,3 +3,4 @@ node_modules
 host.key
 ssh_honeypot.log*
 *.log
+ssh_honeypot.log

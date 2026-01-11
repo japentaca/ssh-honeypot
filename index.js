@@ -445,23 +445,26 @@ class SSHHoneypot {
           session.once('shell', (accept, reject) => {
             const stream = accept();
 
-            // Esperar el delay configurado antes de mostrar el mensaje
+            // Mostrar mensaje inmediatamente y luego cerrar
+            stream.write(`\r\n\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
+            stream.write('Connection will be closed.\r\n\r\n');
+            
+            // Esperar antes de cerrar para que el mensaje se envíe completamente
             setTimeout(() => {
-              stream.write(`\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
-              stream.write('Connection closed by remote host.\r\n');
-
-              setTimeout(() => {
-                stream.end();
-                client.end();
-              }, 1000);
+              stream.exit(0);
+              stream.end();
+              client.end();
             }, CONFIG.WARNING_MESSAGE_DELAY);
           });
 
           session.once('exec', (accept, reject, info) => {
             const stream = accept();
             stream.write(`\r\n${CONFIG.WARNING_MESSAGE_TEXT}\r\n\r\n`);
-            stream.end();
-            client.end();
+            setTimeout(() => {
+              stream.exit(1);
+              stream.end();
+              client.end();
+            }, 500);
           });
         });
       } else {
